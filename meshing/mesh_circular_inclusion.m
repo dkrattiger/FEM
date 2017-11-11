@@ -43,7 +43,8 @@ for i = 1:(n-1)*n_ele_ss+1
 
     % point on big cube on which to end radial points
     x_bs = r_bs;
-    y_bs = r_bs*(-1+2*(i-1)/((n-1)*n_ele_ss));
+    y_bs = r_bs*tan(theta);
+%     y_bs = r_bs*(-1+2*(i-1)/((n-1)*n_ele_ss));
 
     xvec = [linspace(x_ss,x_s,(n-1)*n_ele_c+1),...
             linspace(x_s,x_l,(n-1)*n_ele_layer+1),...
@@ -90,6 +91,7 @@ yloc_new = coords_unique(:,2);
 %% Distort Nodes
 % ======================================================================= %
 
+% compute polar coordinates for each node
 thetas = atan2(yloc_new,xloc_new);
 radius = sqrt(xloc_new.^2+yloc_new.^2);
 
@@ -98,6 +100,7 @@ r_end = abs(r_bs./cos(thetas));
 r_end(abs(xloc_new)<abs(yloc_new)) = abs(r_bs./sin(thetas(abs(xloc_new)<abs(yloc_new))));
 rad_dist = radius/r_c;
 rad_dist(radius>r_c) = -(radius(radius>r_c)-r_c)./(r_end(radius>r_c)-r_c)+1;
+
 
 % choose model type
 model_select = 1;
@@ -211,11 +214,7 @@ ele_patch_edge = [1:n-1,...
                   n:n:(n^2-n),...
                   n^2:-1:(n^2-n+2),...
                   (n^2-n+1):-n:(n+1)];
-% 1:n-1
-% n:n:(n^2-n)
-% n^2:-1:(n^2-n+2)
-% (n^2-n+1):-n:(n+1)
-% pause
+
 ele_patch_full = [ele_patch_edge,4*(n-1)+1:n^2];
       
 % six_patches = [bottom;top;side12;side23;side34;side41];
@@ -230,30 +229,8 @@ end
 % coloring vector
 C = ([pattern,pattern,pattern]+1)/3;
 
-
-
 % node coordinate array
 xylocs = [xloc_new,yloc_new];
-
-%% Define Boundary sets
-% ======================================================================= %
-
-% node_rect = reshape(1:n_nodes_side,(n_ele_ss*(n-1)+1),((n_ele_c+n_ele_layer+n_ele_bs)*(n-1)+1));
-% 
-% i_r3 = squeeze(node_rect(2:n_ele_ss*(n-1),(n_ele_c+n_ele_layer+n_ele_bs)*(n-1)+1));
-% i_rd3 = squeeze(node_rect(1,(n_ele_c+n_ele_layer+n_ele_bs)*(n-1)+1));
-% i_rt3 = squeeze(node_rect(n_ele_ss*(n-1)+1,(n_ele_c+n_ele_layer+n_ele_bs)*(n-1)+1));
-% 
-% i_l4 = i_remap4(i_r3((n_ele_ss*(n-1)-1):-1:1));i_l4 = i_l4(:);
-% i_r4 = i_remap2(i_r3);i_r4 = i_r4(:);
-% i_d4 = i_remap5(i_r3);i_d4 = i_d4(:);
-% i_t4 = i_remap3(i_r3((n_ele_ss*(n-1)-1):-1:1));i_t4 = i_t4(:);
-% 
-% i_ld4 = i_remap4(i_rt3);
-% i_rd4 = i_remap2(i_rd3);
-% i_rt4 = i_remap2(i_rt3);
-% i_lt4 = i_remap4(i_rd3);
-
 
 %% Compute Edge lines
 % ======================================================================= %
