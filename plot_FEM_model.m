@@ -61,10 +61,15 @@ if n_dim == 2
     y = coordinates(:,2); 
     
     % plot feature edges
-    h_line = [];    
-    for i = 1:length(edges)
-        h_line(i) = plot(x(edges{i})',y(edges{i})');
+    h_line = [];   
+    if iscell(edges)
+        for i = 1:length(edges)
+            h_line(i) = plot(x(edges{i})',y(edges{i})');
+        end
+    else
+        h_line = plot(x(edges)',y(edges)');
     end
+    
     
     % define axis labels and scaling
     xlabel('x (m)');ylabel('y (m)');

@@ -98,22 +98,37 @@ radius = sqrt(xloc_new.^2+yloc_new.^2);
 % compute radial distortion
 r_end = abs(r_bs./cos(thetas));
 r_end(abs(xloc_new)<abs(yloc_new)) = abs(r_bs./sin(thetas(abs(xloc_new)<abs(yloc_new))));
-rad_dist = radius/r_c;
-rad_dist(radius>r_c) = -(radius(radius>r_c)-r_c)./(r_end(radius>r_c)-r_c)+1;
 
-
+if false
+    % this can result in self intersecting meshes (used in GBMS)
+    rad_dist = radius/r_c;
+    rad_dist(radius>r_c) = 1-(radius(radius>r_c)-r_c)./(r_end(radius>r_c)-r_c);
+else
+%     % points are stretched linearly by displacement of inclusion perimeter
+%     
+%     % developed this much more carefully. Not perfect, but elements tend to
+%     % get less squished at outer perimeter, and no self intersection is
+%     % possible
+%     rad_dist = ones(size(radius));
+%     
+%     % linear
+%     i_o = radius>r_c+1e-10;
+%     rad_dist_o = (1-(radius-r_c)./(r_end-r_c)).*(r_c./radius);
+%     rad_dist(i_o) = rad_dist_o(i_o);
+end
+    
 % choose model type
-model_select = 1;
+model_select = 'Helicoid_Catenoid';
 switch model_select
-    case 1 % helicoid catenoid ( use cir_dist = 0.500, n_petals=8, theta_offset=0) 
+    case 'Helicoid_Catenoid' %( use cir_dist = 0.500, n_petals=8, theta_offset=0) 
         theta_dist = (1-cir_dist^2)*(1+(cir_dist)*1./(1+(cir_dist)*cos(n_petals*(thetas-theta_offset))))-1;
-    case 2 % sinusoidal variation
+    case 'Sinusoidal'
         theta_dist = (cir_dist*cos(n_petals*(thetas-theta_offset)));
-    case 3 % elliptical
+    case 'Elliptical'
         a = 1+cir_dist; 
         b = 1-cir_dist;        
         theta_dist = ((a*b)./sqrt(b^2*cos(floor(n_petals/2)*(thetas-theta_offset)).^2 + a^2*sin(floor(n_petals/2)*(thetas-theta_offset)).^2))-1;
-    case 4 % potato ( use cir_dist = 0.3500?, n_petals=8, theta_offset=0) 
+    case 'Potato' %( use cir_dist = 0.3500?, n_petals=8, theta_offset=0) 
         rand_vals3 = randn(n_petals,2);
         rand_vals3 = [ 0.87132       1.2884
                       -2.2002       1.5935
@@ -130,9 +145,38 @@ switch model_select
             theta_dist = theta_dist + (cir_dist/n_petals)*real(amplitude*exp(1i*(i)*(thetas-theta_offset)));
         end
 end
+r_cp = r_c*(1+theta_dist);
 
-radius = radius.*(1+rad_dist.*theta_dist);
+radius_old = radius;
 
+% inner inclusion distortion (use a square root node distribution)
+i_i = radius < (r_c+1e-10);
+a = (r_c-r_cp)./(r_cp.^2);
+b = 1;
+c = -radius;
+r_i = (-b + sqrt(b.^2-4*a.*c))./(2*a);
+r_i(a==0) = radius(a==0);
+
+
+i_o = ~i_i;
+if false
+    % outside distortion (use a square root node distribution)
+    e = (r_cp-r_c)./((r_end.^2-r_cp.^2)-2*r_end.*(r_end-r_cp));
+    f = 1-2*e.*r_end;
+    g = r_c-e.*r_cp.^2-f.*r_cp - radius;
+
+    r_o = (-f+sqrt(f.^2-4*e.*g))./(2*e);
+    r_o(e==0) = radius(e==0);
+else
+    % outside distortion (use a linear node distribution)
+    r_o = r_cp + (r_end-r_cp).*(radius - r_c)./(r_end-r_c);
+end
+
+% assign new values to radius array
+radius = r_i;
+radius(i_o) = r_o(i_o);
+
+% compute new x and y coordinates based on new radius
 xloc_new = radius.*cos(thetas);
 yloc_new = radius.*sin(thetas);
 
@@ -206,10 +250,7 @@ elenodes = i_expand(elenodes);
 
 %% Create patches for element faces and plot
 % ======================================================================= %
-% ele_patch_edge = [1,5+0*(n-2):4+1*(n-2),...
-%                   2,5+1*(n-2):4+2*(n-2),...
-%                   3,5+2*(n-2):4+3*(n-2),...
-%                   4,5+3*(n-2):4+4*(n-2)];
+
 ele_patch_edge = [1:n-1,...
                   n:n:(n^2-n),...
                   n^2:-1:(n^2-n+2),...
@@ -219,11 +260,11 @@ ele_patch_full = [ele_patch_edge,4*(n-1)+1:n^2];
       
 % six_patches = [bottom;top;side12;side23;side34;side41];
 patchfaces = zeros(n_elements,4*(n-1));
-patchfaces2 = zeros(n_elements,n^2);
+%patchfaces2 = zeros(n_elements,n^2);
 [~,elenode_order_reverse] = sort(elenode_order);
 for i = 1:n_elements
     patchfaces(i,:) = elenodes(i,ele_patch_edge);
-    patchfaces2(i,:) = elenodes(i,elenode_order_reverse);
+    %patchfaces2(i,:) = elenodes(i,elenode_order_reverse);
 end
 
 % coloring vector
@@ -235,35 +276,33 @@ xylocs = [xloc_new,yloc_new];
 %% Compute Edge lines
 % ======================================================================= %
 fedges = [];
-n_tria_patch = 2*(n-1)^2;
-i_patch2tria = zeros(n_tria_patch,3);
-index2=0;
-for i = 1:(n-1)
-    for j = 1:(n-1)
-        index = (i-1)*(n)+j;
-        index2 = index2+1;
-        i_patch2tria(index2*2-1,:) = ([index,index+1,index+n]);
-        i_patch2tria(index2*2,:) = ([index+1,index+n+1,index+n]);
-    
-    end
-end
+n_tria_patch = 4*n-2;
     
 for i = 1:max(pattern)+1
     
     % convert to triangular mesh
     i_mat = find(pattern == (i-1));
-    n_patch_mat = size(patchfaces(i_mat),1);
-    trifaces = zeros(n_tria_patch*n_patch_mat,3);
+    n_edge = size(patchfaces,2);
+    
+    n_patch_mat = length(i_mat);
+    edges = zeros(n_edge*n_patch_mat,2);
+    
     for j = 1:n_patch_mat
-        patch_node_index = patchfaces2(i_mat(j),:);
-        
-        trifaces((j-1)*n_tria_patch+1:j*n_tria_patch,:) = ...
-            patch_node_index(i_patch2tria);
-    end    
-        
-    % compute and plot model edges
-    tria = triangulation(trifaces,xylocs);
-    fedges_i = featureEdges(tria,10*pi/180);
+        edges(((j-1)*n_edge+1):j*n_edge,1) = patchfaces(i_mat(j),:).';
+        edges(((j-1)*n_edge+1):j*n_edge,2) = ...
+            patchfaces(i_mat(j),[2:n_edge,1]).';
+    end
+    
+    % find element edges that occur exactly once (these are feature edges)
+    edges = sort(edges,2);
+    [edges,ia,ic] = unique(edges,'rows');
+    i_keep = false(size(ia));
+    for j = 1:max(ic)
+        if sum(ic==j) == 1
+            i_keep(j) = true;
+        end
+    end
+    fedges_i = edges(i_keep,:);
     fedges = [fedges;fedges_i];
 end
 
@@ -271,43 +310,39 @@ end
 [~,i_unique,~] = unique(sort(fedges,2),'rows','stable');
 fedges = fedges(i_unique,:);
 
-% connect segments
-count = 1;
-fedgecell{count,1} = fedges(1,:)';
-fedges(1,:) = nan;
-while any(~isnan(fedges(:)))
-    
-    % see if any segments connect from beginning
-    [i_r1,i_c1] =  find(fedges == fedgecell{count,1}(1));
-    
-    if ~isempty(i_r1);
-        fedgecell{count,1} = [fedges(i_r1(1),(rem(i_c1(1),2))+1); fedgecell{count,1}];
-        fedges(i_r1,:) = nan;
-    end
-    
-    % see if any segments connect from end
-    [i_r2,i_c2] =  find(fedges == fedgecell{count,1}(end));
-    
-    if ~isempty(i_r2)        
-        fedgecell{count,1} = [fedgecell{count,1};fedges(i_r2(1),(rem(i_c2(1),2))+1)];
-        fedges(i_r2(1),:) = nan;        
-    end
-    
-    
-    if isempty(i_r1) && isempty(i_r2)
-        count = count + 1;
-        [i_r,~] = find(~isnan(fedges));
-        if ~isempty(i_r)
-            fedgecell{count,1} = fedges(i_r(1),:)';
-            fedges(i_r(1),:) = nan;
+if false
+    % connect segments
+    count = 1;
+    fedgecell{count,1} = fedges(1,:)';
+    fedges(1,:) = nan;
+    while any(~isnan(fedges(:)))
+
+        % see if any segments connect from beginning
+        [i_r1,i_c1] =  find(fedges == fedgecell{count,1}(1));
+
+        if ~isempty(i_r1);
+            fedgecell{count,1} = [fedges(i_r1(1),(rem(i_c1(1),2))+1); fedgecell{count,1}];
+            fedges(i_r1,:) = nan;
+        end
+
+        % see if any segments connect from end
+        [i_r2,i_c2] =  find(fedges == fedgecell{count,1}(end));
+
+        if ~isempty(i_r2)        
+            fedgecell{count,1} = [fedgecell{count,1};fedges(i_r2(1),(rem(i_c2(1),2))+1)];
+            fedges(i_r2(1),:) = nan;        
+        end
+
+
+        if isempty(i_r1) && isempty(i_r2)
+            count = count + 1;
+            [i_r,~] = find(~isnan(fedges));
+            if ~isempty(i_r)
+                fedgecell{count,1} = fedges(i_r(1),:)';
+                fedges(i_r(1),:) = nan;
+            end
         end
     end
+
+    fedges = fedgecell;
 end
-
-fedges = fedgecell;
-
-% %% plot patches
-% % ======================================================================= %
-% 
-% figure(2);clf
-% plot_unit_cell(xylocs,patchfaces,C,fedges)
