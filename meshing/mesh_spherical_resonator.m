@@ -3,7 +3,8 @@ function [xloc_new,yloc_new,zloc_new,elenodes,pattern,patchfaces_lite,C_lite,fed
          n_ele_bc,r_sc,r_bc,r_s,r_l,one_patch_per_face)
 
 % The mesh is defined with an internal cube surrounded on all sides by six
-% pyramid-esque cubes. The overall mesh then constitutes a larger cube.
+% pyramid-esque cubes. This allows the definition of a sphere within a
+% larger cube mesh
      
 if nargin<10
     one_patch_per_face = true;
@@ -56,24 +57,40 @@ zgrid = zeros((n-1)*(n_ele_sph+n_ele_layer+n_ele_bc)+1,(n-1)*n_ele_sc+1,(n-1)*n_
 for i = 1:(n-1)*n_ele_sc+1
     for j = 1:(n-1)*n_ele_sc+1
         
-        % point on small cube (internal to sphere) from which to start radial points
+        %             z
+        %             ^
+        %             |
+        %             |
+        %       5 . . . . .
+        %       4 . . . . .
+        %     j 3 . . . . .------>y 
+        %       2 . . . . .
+        %       1 . . . . . 
+        %         1 2 3 4 5
+        % 
+        
+        % X_sc = point on small cube (internal to sphere) from which to start radial points
         x_sc = r_sc;
         y_sc = r_sc*(-1+2*(i-1)/((n-1)*n_ele_sc));
         z_sc = r_sc*(-1+2*(j-1)/((n-1)*n_ele_sc));            
         X_sc = [x_sc;y_sc;z_sc];
         
-        % point on external unit cell cube from which to start radial points
+        % X_bc = point on external unit cell cube at which to end radial points
         x_bc = r_bc;
         y_bc = r_bc*(-1+2*(i-1)/((n-1)*n_ele_sc));
         z_bc = r_bc*(-1+2*(j-1)/((n-1)*n_ele_sc));            
         X_bc = [x_bc;y_bc;z_bc];
         
-        % point on sphere on which to end radial points
+        % X_s = point on sphere on the line between X_sc and X_bc
+        % (make it fall on a line between X_sc and X_bc by making it a
+        % linear combination of the two points)
         a_s = (r_s-norm(X_bc))/(norm(X_sc)-norm(X_bc));
         X_s = a_s*X_sc + (1-a_s)*X_bc;
         x_s = X_s(1);y_s = X_s(2);z_s = X_s(3);
-        
-        % point on spherical layer on which to end radial points
+                
+        % X_l = point on spherical layer on the line between X_sc and X_bc
+        % (make it fall on a line between X_sc and X_bc by making it a
+        % linear combination of the two points)
         a_l = (r_l-norm(X_bc))/(norm(X_sc)-norm(X_bc));
         X_l = a_l*X_sc + (1-a_l)*X_bc;
         x_l = X_l(1);y_l = X_l(2);z_l = X_l(3);
@@ -113,7 +130,6 @@ zloc = [zloc_cube;   zloc_sphr_sixth;   zloc_sphr_sixth;   zloc_sphr_sixth;   zl
 %% identify nodes that overlap using "unique" function (on rounded coordinates)
 % ======================================================================= %
 coords = [xloc,yloc,zloc];
-
 
 % round coordinates so that overlapping points are numerically equivalent
 % (should probably fix this at some point to account for the scale of the
@@ -329,7 +345,7 @@ for i = 1:length(i_recon)
     end
 end
 
-% remove all but surface patches
+% surface patches show where 
 patchfaces_lite = patchfaces_keep;
 patchfaces_lite(i_rem_patch,:) = [];
 n_patches = size(patchfaces_lite,1);
@@ -399,35 +415,25 @@ fedges = [];
 % loop through different materials
 for i = 1:max(pattern6vec_lite)
     
-    % convert to triangular mesh
+    % Triangulate mesh (this is necessary to find feature edges)
     i_mat = find(pattern6vec_lite == (i));
     n_pts = size(patchfaces_lite,2);
     
     tri_faces = zeros(length(i_mat)*(n_pts-2),3);
     
     for j = 1:length(i_mat)
-        node_ind = 1:n_pts;
+        node_ind = patchfaces_lite(i_mat(j),:);
         
-        for k = 1:n_pts-2
-            
-            n_pts_left = n_pts-k+1;
-            
-            dxdydz =  coordinates(patchfaces_lite(i_mat(j),node_ind([2:n_pts_left,1])),:)-...
-                      coordinates(patchfaces_lite(i_mat(j),node_ind),:);            
-            dnorm = sqrt(sum(dxdydz.*dxdydz,2));
-
-            sharp = sum(dxdydz.*dxdydz([n_pts_left,1:(n_pts_left-1)],:),2)./(dnorm.*dnorm([n_pts_left,1:(n_pts_left-1)]));
-            
-            
-            [~,i_max] = min(abs(sharp));
-            tri_faces((j-1)*(n_pts-2)+k,:) = patchfaces_lite(i_mat(j),node_ind(mod(i_max+[-2:0],n_pts_left)+1));
-            
-            node_ind(i_max) = [];
-            
-        end
+        % patch x and y coordinates
+        xpatch = coordinates(node_ind,1);
+        ypatch = coordinates(node_ind,2);
+        zpatch = coordinates(node_ind,3);
+        
+        % triangulate patch
+        iTri = patch3D2tri(xpatch,ypatch,zpatch);
+        tri_faces(((j-1)*(n_pts-2)+1):(j*(n_pts-2)),:) = node_ind(iTri);
+        
     end
-%     size(tri_faces)
-%     size(coordinates)
     
     if ~isempty(tri_faces)
         % compute and plot model edges
@@ -437,40 +443,33 @@ for i = 1:max(pattern6vec_lite)
     end
 end
 
-
-
-% % find unique segments
-% [~,i_unique,~] = unique(sort(fedges,2),'rows','stable');
-% fedges = fedges(i_unique,:);
-
-
 % find unique segments
 [~,i_unique,~] = unique(sort(fedges,2),'rows','stable');
 fedges = fedges(i_unique,:);
 
-% connect segments
+% connect segments so that lines are continuous
 count = 1;
 fedgecell{count,1} = fedges(1,:)';
 fedges(1,:) = nan;
 while any(~isnan(fedges(:)))
-    
+
     % see if any segments connect from beginning
     [i_r1,i_c1] =  find(fedges == fedgecell{count,1}(1));
-    
-    if ~isempty(i_r1);
+
+    if ~isempty(i_r1)
         fedgecell{count,1} = [fedges(i_r1(1),(rem(i_c1(1),2))+1); fedgecell{count,1}];
-        fedges(i_r1,:) = nan;
+        fedges(i_r1(1),:) = nan;
     end
-    
+
     % see if any segments connect from end
     [i_r2,i_c2] =  find(fedges == fedgecell{count,1}(end));
-    
+
     if ~isempty(i_r2)        
         fedgecell{count,1} = [fedgecell{count,1};fedges(i_r2(1),(rem(i_c2(1),2))+1)];
         fedges(i_r2(1),:) = nan;        
     end
-    
-    
+
+
     if isempty(i_r1) && isempty(i_r2)
         count = count + 1;
         [i_r,~] = find(~isnan(fedges));
@@ -482,71 +481,3 @@ while any(~isnan(fedges(:)))
 end
 
 fedges = fedgecell;
-
-% % connect segments
-% connect_segs = true;
-% if connect_segs
-%     count = 1;
-%     fedgecell{count,1} = fedges(1,:)';
-%     fedges(1,:) = nan;
-%     while any(~isnan(fedges(:)))
-% 
-%         % see if any segments connect from beginning
-%         [i_r1,i_c1] =  find(fedges == fedgecell{count,1}(1));
-% 
-%         if ~isempty(i_r1);
-%             fedgecell{count,1} = [fedges(i_r1(1),(rem(i_c1(1),2))+1); fedgecell{count,1}];
-%             fedges(i_r1(1),:) = nan;
-%         end
-% 
-%         % see if any segments connect from end
-%         [i_r2,i_c2] =  find(fedges == fedgecell{count,1}(end));
-% 
-%         if ~isempty(i_r2)        
-%             fedgecell{count,1} = [fedgecell{count,1};fedges(i_r2(1),(rem(i_c2(1),2))+1)];
-%             fedges(i_r2(1),:) = nan;        
-%         end
-% 
-% 
-%         if isempty(i_r1) && isempty(i_r2)
-%             count = count + 1;
-%             [i_r,~] = find(~isnan(fedges));
-%             if ~isempty(i_r)
-%                 fedgecell{count,1} = fedges(i_r(1),:)';
-%                 fedges(i_r(1),:) = nan;
-%             end
-%         end
-%     end
-% 
-%     fedges = fedgecell;
-% end
-
-% %% plot patches
-% % ======================================================================= %
-
-% figure(2);clf
-% view(3)
-% h1 = patch('faces',patchfaces_lite,...
-%     'vertices',xyzlocs,'facecolor','w');
-% set(h1,'edgecolor',[1,1,1]*0.85)
-% set(h1,'FaceColor','flat')
-% set(h1,'FaceVertexCData',C_lite)
-% % set(h1,'facealpha',0.5)
-% 
-% % set(h1,'FaceColor','interp')
-% % set(h2,'FaceVertexCData',color_vals)
-% set(h1,'CDataMapping','direct')
-% 
-% % pause
-% 
-% % plot model edges
-% hold on
-% hline1 = plot3(xloc_new(fedges)',yloc_new(fedges)',zloc_new(fedges)');
-% set(hline1,'color','k')
-% set(hline1,'linestyle','-')
-% set(hline1,'linewidth',2)
-% 
-% xlabel('x (m)');ylabel('y (m)');title('Unit Cell');
-% axis equal
-% 
-% set(gcf,'renderer','opengl')
